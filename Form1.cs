@@ -1,16 +1,20 @@
+using Npgsql;
+using NpgsqlTypes;
 using System;
+using System.Collections.Generic;
+using System.Configuration;
 using System.Data;
 using System.Drawing;
-using System.Windows.Forms;
-using System.Linq;
 using System.Drawing.Printing;
-using Npgsql;
+using System.Linq;
+using System.Windows.Forms;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace Lab1_WinForms
 {
     public partial class Form1 : Form
     {
-        private readonly string _connString = "Host=localhost;Port=5432;Database=kozyrev;Username=postgres;Password=admin";
+        private string _connString = System.Configuration.ConfigurationManager.ConnectionStrings["MyConnection"].ConnectionString;
         private DataTable _dtDays;
         private int _printRowIndex = 0;
         private DataTable _dtStatuses;
@@ -19,6 +23,7 @@ namespace Lab1_WinForms
         public Form1()
         {
             InitializeComponent();
+            this.Text = "CRUD расписания врача";
             dgvSchedule.CellDoubleClick += dgvSchedule_CellDoubleClick;
             dgvSchedule.CellFormatting += DgvSchedule_CellFormatting;
             dgvSchedule.CellMouseDown += DgvSchedule_CellMouseDown;
@@ -51,7 +56,7 @@ namespace Lab1_WinForms
                 string sqlEmps = @"
                     SELECT e.id, e.fio, s.name AS spec_name
                     FROM emp e
-                    LEFT JOIN spec s ON e.specid = s.id
+                    JOIN spec s ON e.specid = s.id
                     ORDER BY e.fio";
                 new NpgsqlDataAdapter(sqlEmps, conn).Fill(dtEmps);
 
@@ -59,9 +64,9 @@ namespace Lab1_WinForms
                 var dtSchedule = new DataTable();
                 string sqlSchedule = @"
                     SELECT sch.id, sch.empid, sch.dayweekid, sch.workfrom, sch.workto, 
-                           sch.statusid, st.name AS status_name
+                    st.name AS status_name
                     FROM schedule sch
-                    LEFT JOIN status st ON sch.statusid = st.id";
+                    JOIN status st ON sch.statusid = st.id";
                 new NpgsqlDataAdapter(sqlSchedule, conn).Fill(dtSchedule);
 
                 // 5. Формируем таблицу для DataGridView
@@ -71,6 +76,7 @@ namespace Lab1_WinForms
                 gridTable.Columns.Add("Специализация", typeof(string));
                 gridTable.Columns.Add("Статус", typeof(string));
 
+                // Формируем названия столбцов, кроме первых четырёх
                 foreach (DataRow day in _dtDays.Rows)
                 {
                     gridTable.Columns.Add(day["name"].ToString(), typeof(string));
@@ -84,7 +90,8 @@ namespace Lab1_WinForms
 
                     row["empid"] = empId;
                     row["Врач"] = emp["fio"];
-                    row["Специализация"] = emp["spec_name"] == DBNull.Value ? "Не указана" : emp["spec_name"];
+                    // По правилам БД специализация у врача не может быть NULL
+                    row["Специализация"] = emp["spec_name"];
 
                     // Берем единый статус врача из первой записи его расписания
                     DataRow[] empSchedules = dtSchedule.Select($"empid = {empId}");
@@ -99,7 +106,7 @@ namespace Lab1_WinForms
                         string dayName = day["name"].ToString();
 
                         DataRow[] found = dtSchedule.Select($"empid = {empId} AND dayweekid = {dayId}");
-
+                        // Если мы нашли время для конкретного врача в базе, выводим его в ячейку
                         if (found.Length > 0 && found[0]["workfrom"] != DBNull.Value && found[0]["workto"] != DBNull.Value)
                         {
                             TimeOnly from = (TimeOnly)found[0]["workfrom"];
@@ -116,6 +123,7 @@ namespace Lab1_WinForms
                 }
 
                 dgvSchedule.DataSource = gridTable;
+                // Невидимая колонка с идентификаторами
                 dgvSchedule.Columns["empid"].Visible = false;
                 dgvSchedule.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             }
@@ -133,7 +141,7 @@ namespace Lab1_WinForms
 
         private void dgvSchedule_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
-            // Игнорируем клики по заголовкам и первым 4 колонкам (empID, Врач, Специализация, Статус)
+            // Игнорируем клики по заголовкам и первым 3 колонкам (Врач, Специализация, Статус)
             if (e.RowIndex < 0 || e.ColumnIndex < 4) return;
 
             int empId = Convert.ToInt32(dgvSchedule.Rows[e.RowIndex].Cells["empid"].Value);
@@ -247,7 +255,64 @@ namespace Lab1_WinForms
                 }
             }
         }
-        // 1. Вставка новой записи в расписание (выбор врача, статуса и рабочих дней)
+        private void SaveDoctorWeekSchedule(int empId, int statusId, List<int> dayIds, TimeOnly workFrom, TimeOnly workTo)
+        {
+            using (var conn = new NpgsqlConnection(_connString))
+            {
+                conn.Open();
+                using (var tran = conn.BeginTransaction())
+                {
+                    // Обновляем единый статус для всех уже существующих записей врача
+                    using (var updStatusCmd = new NpgsqlCommand(@"UPDATE schedule SET statusid = @statusId WHERE empid = @empId", conn, tran))
+                    {
+                        updStatusCmd.Parameters.AddWithValue("statusId", statusId);
+                        updStatusCmd.Parameters.AddWithValue("empId", empId);
+                        updStatusCmd.ExecuteNonQuery();
+                    }
+
+                    // Для каждого выбранного дня делаем UPDATE или INSERT
+                    foreach (int dayId in dayIds)
+                    {
+                        // 1. Проверим, существует ли ячейка расписания, куда мы хотим внести изменения
+                        object existingId;
+                        using (var checkCmd = new NpgsqlCommand(@"SELECT id FROM schedule WHERE empid = @empId AND dayweekid = @dayId LIMIT 1", conn, tran))
+                        {
+                            checkCmd.Parameters.AddWithValue("empId", empId);
+                            checkCmd.Parameters.AddWithValue("dayId", dayId);
+                            existingId = checkCmd.ExecuteScalar();
+                        }
+                        // 2. Если существует, то вносим изменения в неё, иначе добавляем
+                        if (existingId != null && existingId != DBNull.Value)
+                        {
+                            string updateSql = @"UPDATE schedule SET workfrom = @workFrom, workto = @workTo, statusid = @statusId WHERE id = @id";
+                            using (var cmd = new NpgsqlCommand(updateSql, conn, tran))
+                            {
+                                cmd.Parameters.AddWithValue("workFrom", workFrom);
+                                cmd.Parameters.AddWithValue("workTo", workTo);
+                                cmd.Parameters.AddWithValue("statusId", statusId);
+                                cmd.Parameters.AddWithValue("id", Convert.ToInt32(existingId));
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+                        else
+                        {
+                            string insertSql = @"INSERT INTO schedule (workfrom, workto, statusid, empid, dayweekid) VALUES (@workFrom, @workTo, @statusId, @empId, @dayId)";
+                            using (var cmd = new NpgsqlCommand(insertSql, conn, tran))
+                            {
+                                cmd.Parameters.AddWithValue("workFrom", workFrom);
+                                cmd.Parameters.AddWithValue("workTo", workTo);
+                                cmd.Parameters.AddWithValue("statusId", statusId);
+                                cmd.Parameters.AddWithValue("empId", empId);
+                                cmd.Parameters.AddWithValue("dayId", dayId);
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+                    }
+                    tran.Commit();
+                }
+            }
+        }
+        // Вставка новой записи в расписание (выбор врача, статуса и рабочих дней)
         private void btnAddSchedule_Click(object sender, EventArgs e)
         {
             if (dgvSchedule.CurrentRow == null)
@@ -281,96 +346,11 @@ namespace Lab1_WinForms
                 }
             }
         }
-
-        private void SaveDoctorWeekSchedule(int empId, int statusId, System.Collections.Generic.List<int> dayIds, TimeOnly workFrom, TimeOnly workTo)
-        {
-            using (var conn = new NpgsqlConnection(_connString))
-            {
-                conn.Open();
-                using (var tran = conn.BeginTransaction())
-                {
-                    // Обновляем единый статус для всех уже существующих записей врача
-                    using (var updStatusCmd = new NpgsqlCommand(@"UPDATE schedule SET statusid = @statusId WHERE empid = @empId", conn, tran))
-                    {
-                        updStatusCmd.Parameters.AddWithValue("statusId", statusId);
-                        updStatusCmd.Parameters.AddWithValue("empId", empId);
-                        updStatusCmd.ExecuteNonQuery();
-                    }
-
-                    // Для каждого выбранного дня делаем UPDATE или INSERT
-                    foreach (int dayId in dayIds)
-                    {
-                        object existingId;
-                        using (var checkCmd = new NpgsqlCommand(@"SELECT id FROM schedule WHERE empid = @empId AND dayweekid = @dayId LIMIT 1", conn, tran))
-                        {
-                            checkCmd.Parameters.AddWithValue("empId", empId);
-                            checkCmd.Parameters.AddWithValue("dayId", dayId);
-                            existingId = checkCmd.ExecuteScalar();
-                        }
-
-                        if (existingId != null && existingId != DBNull.Value)
-                        {
-                            string updateSql = @"UPDATE schedule SET workfrom = @workFrom, workto = @workTo, statusid = @statusId WHERE id = @id";
-                            using (var cmd = new NpgsqlCommand(updateSql, conn, tran))
-                            {
-                                cmd.Parameters.AddWithValue("workFrom", workFrom);
-                                cmd.Parameters.AddWithValue("workTo", workTo);
-                                cmd.Parameters.AddWithValue("statusId", statusId);
-                                cmd.Parameters.AddWithValue("id", Convert.ToInt32(existingId));
-                                cmd.ExecuteNonQuery();
-                            }
-                        }
-                        else
-                        {
-                            string insertSql = @"INSERT INTO schedule (workfrom, workto, statusid, empid, dayweekid) VALUES (@workFrom, @workTo, @statusId, @empId, @dayId)";
-                            using (var cmd = new NpgsqlCommand(insertSql, conn, tran))
-                            {
-                                cmd.Parameters.AddWithValue("workFrom", workFrom);
-                                cmd.Parameters.AddWithValue("workTo", workTo);
-                                cmd.Parameters.AddWithValue("statusId", statusId);
-                                cmd.Parameters.AddWithValue("empId", empId);
-                                cmd.Parameters.AddWithValue("dayId", dayId);
-                                cmd.ExecuteNonQuery();
-                            }
-                        }
-                    }
-                    tran.Commit();
-                }
-            }
-        }
-
-
         private void DgvSchedule_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
         {
         }
 
-
-        //private void UpdateDoctorWeekStatus(int newStatusId)
-        //{
-        //    if (dgvSchedule.SelectedRows.Count == 0) return;
-        //    int empId = Convert.ToInt32(dgvSchedule.SelectedRows[0].Cells["empid"].Value);
-
-        //    using (var conn = new NpgsqlConnection(_connString))
-        //    {
-        //        conn.Open();
-        //        string sql = @"UPDATE schedule SET statusid = @statusId WHERE empid = @empId";
-        //        using (var cmd = new NpgsqlCommand(sql, conn))
-        //        {
-        //            cmd.Parameters.AddWithValue("statusId", newStatusId);
-        //            cmd.Parameters.AddWithValue("empId", empId);
-        //            int affected = cmd.ExecuteNonQuery();
-
-        //            if (affected == 0)
-        //            {
-        //                MessageBox.Show("У врача еще нет записей в расписании. Сначала добавьте рабочие дни.",
-        //                    "Внимание", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        //            }
-        //        }
-        //    }
-        //    LoadScheduleGrid();
-        //}
-
-        // 3. Удаление всего расписания выбранного врача
+        // Удаление всего расписания выбранного врача
         private void btnDeleteDoctorSchedule_Click(object sender, EventArgs e)
         {
             if (dgvSchedule.CurrentRow == null) return;
@@ -423,10 +403,10 @@ namespace Lab1_WinForms
             int topMargin = e.MarginBounds.Top;
             int y = topMargin;
 
-            using Font titleFont = new Font("Segoe UI", 14, FontStyle.Bold);
-            using Font subTitleFont = new Font("Segoe UI", 9, FontStyle.Italic);
-            using Font headerFont = new Font("Segoe UI", 9, FontStyle.Bold);
-            using Font cellFont = new Font("Segoe UI", 9, FontStyle.Regular);
+            using System.Drawing.Font titleFont = new System.Drawing.Font("Segoe UI", 14, FontStyle.Bold);
+            using System.Drawing.Font subTitleFont = new System.Drawing.Font("Segoe UI", 9, FontStyle.Italic);
+            using System.Drawing.Font headerFont = new System.Drawing.Font("Segoe UI", 9, FontStyle.Bold);
+            using System.Drawing.Font cellFont = new System.Drawing.Font("Segoe UI", 9, FontStyle.Regular);
             using Pen borderPen = new Pen(Color.Black, 1);
 
             // Заголовок отчета на первой странице
@@ -503,6 +483,29 @@ namespace Lab1_WinForms
         private void btnAddSchedule_Click_1(object sender, EventArgs e)
         {
 
+        }
+
+        private void btnFind_Click(object sender, EventArgs e)
+        {
+            using (var conn = new NpgsqlConnection(_connString))
+            {
+                conn.Open();
+                int searchId = (int)nudFind.Value;
+                using (var cmd = new NpgsqlCommand($"SELECT * FROM search_emp_by_id({searchId})", conn))
+                {
+                    var param = new NpgsqlParameter("search_id", NpgsqlDbType.Integer)
+                    {
+                        Value = searchId
+                    };
+                    cmd.Parameters.Add(param);
+                    using (var adapter = new NpgsqlDataAdapter(cmd))
+                    {
+                        DataTable table = new DataTable();
+                        adapter.Fill(table);
+                        dgvFunc.DataSource = table;
+                    }
+                }
+            }
         }
     }
 }

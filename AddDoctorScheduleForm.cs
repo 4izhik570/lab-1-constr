@@ -40,7 +40,10 @@ namespace Lab1_WinForms
                 if (match != null)
                     cmbEmp.SelectedValue = match["id"];
             }
-
+            else
+            {
+                cmbEmp.SelectedValue = dtEmps.Rows[0]["fio"];
+            }
             foreach (DataRow row in dtDays.Rows)
             {
                 clbDays.Items.Add(new DayItem
@@ -84,6 +87,7 @@ namespace Lab1_WinForms
                     SelectedDayIds.Add(item.Id);
                 }
 
+                // Чтобы логика Form1 не ломалась (метод btnAddSchedule_Click)
                 this.DialogResult = DialogResult.OK;
                 this.Close();
             };

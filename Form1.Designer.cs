@@ -32,7 +32,12 @@
             btnAddSchedule = new Button();
             btnDeleteDoctorSchedule = new Button();
             btnPrint = new Button();
+            btnFind = new Button();
+            dgvFunc = new DataGridView();
+            nudFind = new NumericUpDown();
             ((System.ComponentModel.ISupportInitialize)dgvSchedule).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)dgvFunc).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)nudFind).BeginInit();
             SuspendLayout();
             // 
             // dgvSchedule
@@ -44,7 +49,7 @@
             dgvSchedule.ReadOnly = true;
             dgvSchedule.RowHeadersWidth = 51;
             dgvSchedule.SelectionMode = DataGridViewSelectionMode.CellSelect;
-            dgvSchedule.Size = new Size(673, 284);
+            dgvSchedule.Size = new Size(673, 153);
             dgvSchedule.TabIndex = 0;
             // 
             // btnAddSchedule
@@ -75,11 +80,44 @@
             btnPrint.Text = "Печать расписания";
             btnPrint.UseVisualStyleBackColor = true;
             // 
+            // btnFind
+            // 
+            btnFind.Location = new Point(12, 390);
+            btnFind.Name = "btnFind";
+            btnFind.Size = new Size(161, 29);
+            btnFind.TabIndex = 5;
+            btnFind.Text = "Найти врача по ID";
+            btnFind.UseVisualStyleBackColor = true;
+            btnFind.Click += btnFind_Click;
+            // 
+            // dgvFunc
+            // 
+            dgvFunc.AllowUserToAddRows = false;
+            dgvFunc.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            dgvFunc.Location = new Point(252, 322);
+            dgvFunc.Name = "dgvFunc";
+            dgvFunc.ReadOnly = true;
+            dgvFunc.RowHeadersWidth = 51;
+            dgvFunc.Size = new Size(354, 97);
+            dgvFunc.TabIndex = 6;
+            // 
+            // nudFind
+            // 
+            nudFind.Location = new Point(12, 334);
+            nudFind.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
+            nudFind.Name = "nudFind";
+            nudFind.Size = new Size(161, 27);
+            nudFind.TabIndex = 7;
+            nudFind.Value = new decimal(new int[] { 1, 0, 0, 0 });
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(800, 450);
+            Controls.Add(nudFind);
+            Controls.Add(dgvFunc);
+            Controls.Add(btnFind);
             Controls.Add(btnPrint);
             Controls.Add(btnDeleteDoctorSchedule);
             Controls.Add(btnAddSchedule);
@@ -87,6 +125,8 @@
             Name = "Form1";
             Text = "Form1";
             ((System.ComponentModel.ISupportInitialize)dgvSchedule).EndInit();
+            ((System.ComponentModel.ISupportInitialize)dgvFunc).EndInit();
+            ((System.ComponentModel.ISupportInitialize)nudFind).EndInit();
             ResumeLayout(false);
         }
 
@@ -96,5 +136,8 @@
         private Button btnAddSchedule;
         private Button btnDeleteDoctorSchedule;
         private Button btnPrint;
+        private Button btnFind;
+        private DataGridView dgvFunc;
+        private NumericUpDown nudFind;
     }
 }
