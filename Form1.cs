@@ -18,7 +18,6 @@ namespace Lab1_WinForms
         private DataTable _dtDays;
         private int _printRowIndex = 0;
         private DataTable _dtStatuses;
-        private ContextMenuStrip _statusMenu;
 
         public Form1()
         {
@@ -34,7 +33,6 @@ namespace Lab1_WinForms
             //dgvSchedule.CellMouseDown += DgvSchedule_CellMouseDown;
 
             LoadScheduleGrid();
-            //BuildStatusContextMenu();
         }
 
         private void LoadScheduleGrid()
@@ -105,6 +103,7 @@ namespace Lab1_WinForms
                         int dayId = Convert.ToInt32(day["id"]);
                         string dayName = day["name"].ToString();
 
+                        // Заполняются ячейки из разных строк и столбцов (в зависимости от итерации цикла) 
                         DataRow[] found = dtSchedule.Select($"empid = {empId} AND dayweekid = {dayId}");
                         // Если мы нашли время для конкретного врача в базе, выводим его в ячейку
                         if (found.Length > 0 && found[0]["workfrom"] != DBNull.Value && found[0]["workto"] != DBNull.Value)
@@ -206,7 +205,7 @@ namespace Lab1_WinForms
                     return;
                 }
 
-                // 2. Берем единый статус врача из его существующих записей (или первый из справочника)
+                // 2. Берем единый статус врача
                 int statusId = Convert.ToInt32(_dtStatuses.Rows.Cast<DataRow>().First()["id"]);
                 using (var stCmd = new NpgsqlCommand(@"SELECT statusid FROM schedule WHERE empid = @empId AND statusid IS NOT NULL LIMIT 1", conn))
                 {
@@ -491,13 +490,9 @@ namespace Lab1_WinForms
             {
                 conn.Open();
                 int searchId = (int)nudFind.Value;
-                using (var cmd = new NpgsqlCommand($"SELECT * FROM search_emp_by_id({searchId})", conn))
+                using (var cmd = new NpgsqlCommand(@"SELECT * FROM search_emp_by_id(@searchId)", conn))
                 {
-                    var param = new NpgsqlParameter("search_id", NpgsqlDbType.Integer)
-                    {
-                        Value = searchId
-                    };
-                    cmd.Parameters.Add(param);
+                    cmd.Parameters.AddWithValue("searchid",searchId);
                     using (var adapter = new NpgsqlDataAdapter(cmd))
                     {
                         DataTable table = new DataTable();

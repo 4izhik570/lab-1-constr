@@ -87,7 +87,7 @@ namespace Lab1_WinForms
                     SelectedDayIds.Add(item.Id);
                 }
 
-                // Чтобы логика Form1 не ломалась (метод btnAddSchedule_Click)
+                // Чтобы логика Form1 не ломалась (смотри метод btnAddSchedule_Click)
                 this.DialogResult = DialogResult.OK;
                 this.Close();
             };
